@@ -1,0 +1,21 @@
+{
+  "name": "kvm-share",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prototipo de mouse/teclado/clipboard compartidos entre Mac y Windows en la misma red local",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "postinstall": "bash scripts/postinstall.sh"
+  },
+  "dependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  },
+  "allowScripts": {
+    "electron@31.7.7": true
+  }
+}

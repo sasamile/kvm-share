@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.001); /* casi transparente pero clickeable */
+    cursor: crosshair;
+    overflow: hidden;
+    user-select: none;
+  }
+  #hint {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px;
+    color: #fff;
+    background: rgba(20, 20, 20, 0.85);
+    padding: 14px 22px;
+    border-radius: 10px;
+    text-align: center;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+  <div id="hint">
+    Haz clic para tomar el control remoto<br />
+    <span style="opacity:.7; font-size:13px">Presiona Esc para soltarlo</span>
+  </div>
+  <script src="overlay.js"></script>
+</body>
+</html>
