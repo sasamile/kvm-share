@@ -4,6 +4,21 @@ let active = false;
 window.kvm.onActiveChange((isActive) => {
   active = isActive;
   hint.style.display = isActive ? 'block' : 'none';
+  if (isActive) {
+    try {
+      document.body.requestPointerLock();
+    } catch (_) {
+      /* ignore */
+    }
+  } else if (document.pointerLockElement) {
+    document.exitPointerLock();
+  }
+});
+
+document.body.addEventListener('click', () => {
+  if (active && !document.pointerLockElement) {
+    document.body.requestPointerLock();
+  }
 });
 
 document.addEventListener('mousemove', (e) => {

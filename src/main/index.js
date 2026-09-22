@@ -11,6 +11,7 @@ const { startEdgeControl, virtualBounds } = require('./edge');
 if (app.dock) app.dock.hide();
 
 let overlayWindow = null;
+let recenterTimer = null;
 
 function createOverlayWindow() {
   const b = virtualBounds();
@@ -48,9 +49,34 @@ function showOverlay() {
   overlayWindow.show();
   overlayWindow.focus();
   overlayWindow.webContents.send('overlay-active', true);
+  // Sacar el cursor del borde: si se queda en la esquina, Windows no genera más movimiento.
+  const { mouse, Point } = require('@nut-tree-fork/nut-js');
+  const cx = Math.round(b.minX + b.width / 2);
+  const cy = Math.round(b.minY + b.height / 2);
+  mouse.setPosition(new Point(cx, cy)).catch(() => {});
+
+  if (recenterTimer) clearInterval(recenterTimer);
+  recenterTimer = setInterval(() => {
+    mouse.getPosition().then((pos) => {
+      const edge = 40;
+      if (
+        pos.x <= b.minX + edge ||
+        pos.x >= b.maxX - edge ||
+        pos.y <= b.minY + edge ||
+        pos.y >= b.maxY - edge
+      ) {
+        return mouse.setPosition(new Point(cx, cy));
+      }
+      return null;
+    }).catch(() => {});
+  }, 200);
 }
 
 function hideOverlay() {
+  if (recenterTimer) {
+    clearInterval(recenterTimer);
+    recenterTimer = null;
+  }
   if (!overlayWindow) return;
   overlayWindow.webContents.send('overlay-active', false);
   overlayWindow.hide();
