@@ -6,6 +6,7 @@
   "main": "src/main/index.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test",
     "postinstall": "node -e \"process.platform==='darwin'&&require('child_process').execSync('bash scripts/postinstall.sh',{stdio:'inherit'})\""
   },
   "dependencies": {
