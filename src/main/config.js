@@ -11,8 +11,10 @@ const DEFAULT_CONFIG = {
   port: 42420,
   peerHost: '192.168.1.50',
 
-  // Atajo para "tomar el control" y empezar a enviar mouse/teclado a la otra máquina.
-  // Para soltar el control simplemente se presiona Escape (libera el Pointer Lock).
+  // Por qué borde de TUS pantallas se sale hacia el otro PC: "left" | "right" | "top" | "bottom".
+  peerEdge: 'right',
+
+  // Atajo de emergencia para forzar la vuelta del mouse a esta máquina.
   controlHotkey: 'Control+Alt+K',
 };
 
