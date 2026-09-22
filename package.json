@@ -6,7 +6,7 @@
   "main": "src/main/index.js",
   "scripts": {
     "start": "electron .",
-    "postinstall": "bash scripts/postinstall.sh"
+    "postinstall": "node -e \"process.platform==='darwin'&&require('child_process').execSync('bash scripts/postinstall.sh',{stdio:'inherit'})\""
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.0",

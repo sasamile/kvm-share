@@ -48,9 +48,7 @@ app.whenReady().then(() => {
   const peer = new Peer(config);
   const clipboardSync = startClipboardSync(peer);
 
-  const tray = createTray({ onQuit: () => app.quit() });
-  tray.setNetworkStatus('iniciando...');
-  tray.setControlStatus('local');
+  const tray = createTray({ config, onQuit: () => app.quit() });
 
   peer.on('status', (text) => tray.setNetworkStatus(text));
 
