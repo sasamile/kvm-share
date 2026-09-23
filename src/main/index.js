@@ -145,11 +145,23 @@ app.whenReady().then(() => {
   });
 
   const hotkey = config.controlHotkey || 'Control+Alt+K';
-  const registered = globalShortcut.register(hotkey, () => {
-    if (edge.isSending()) edge.forceReturn();
-  });
+  const toggleControl = () => {
+    if (edge.isSending()) {
+      edge.forceReturn();
+      return;
+    }
+    edge.forceStart().then((ok) => {
+      if (!ok) {
+        console.warn(`[kvm] ${hotkey}: necesita estar Conectado al otro PC primero.`);
+      }
+    });
+  };
+
+  const registered = globalShortcut.register(hotkey, toggleControl);
   if (!registered) {
-    console.error(`No se pudo registrar el atajo "${hotkey}".`);
+    console.error(`No se pudo registrar el atajo "${hotkey}". Prueba otro en config.json (ej. "Control+Shift+K").`);
+  } else {
+    console.log(`[kvm] atajo listo: ${hotkey} = ir/volver al otro PC`);
   }
 
   screen.on('display-metrics-changed', () => {
@@ -160,7 +172,7 @@ app.whenReady().then(() => {
   });
 
   console.log(`[kvm] paso por borde → peer en "${config.peerEdge || 'right'}"`);
-  console.log(`[kvm] emergencia (devolver mouse): ${hotkey}`);
+  console.log(`[kvm] si ves "Desconectado": en la Mac debe estar listen + bun run start`);
 });
 
 app.on('window-all-closed', (e) => {

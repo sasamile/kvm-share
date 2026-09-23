@@ -165,7 +165,30 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
     },
 
     async forceReturn() {
+      // Siempre ocultar overlay, aunque el estado haya quedado raro.
+      if (!sending) {
+        if (onLeaveRemote) onLeaveRemote();
+        setStatus('local');
+        return;
+      }
       await endSending(true);
+    },
+
+    async forceStart() {
+      if (sending || receiving) return false;
+      if (!peer.connected) {
+        console.warn('[edge] No hay peer conectado; no se puede controlar.');
+        setStatus('sin peer (no conectado)');
+        return false;
+      }
+      try {
+        const pos = await mouse.getPosition();
+        await beginSending(pos);
+        return true;
+      } catch (err) {
+        console.error('[edge] forceStart:', err.message);
+        return false;
+      }
     },
 
     async handlePeerMessage(msg) {

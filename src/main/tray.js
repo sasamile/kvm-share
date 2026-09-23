@@ -30,7 +30,7 @@ function createTray({ config, onQuit }) {
       { label: modeLabel, enabled: false },
       { label: `Mi IP: ${ips.length ? ips.join(', ') : 'sin red'}`, enabled: false },
       { label: `Borde peer: ${config.peerEdge || 'right'}`, enabled: false },
-      { label: `Volver: ${config.controlHotkey}`, enabled: false },
+      { label: `Atajo ir/volver: ${config.controlHotkey}`, enabled: false },
       { type: 'separator' },
       { label: 'Abrir config.json', click: () => shell.openPath(CONFIG_PATH) },
       { type: 'separator' },
