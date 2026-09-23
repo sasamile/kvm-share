@@ -1,6 +1,6 @@
 const { clipboard } = require('electron');
 
-const POLL_INTERVAL_MS = 900;
+const POLL_INTERVAL_MS = 400;
 
 function startClipboardSync(peer) {
   let lastText = clipboard.readText();

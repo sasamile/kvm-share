@@ -15,7 +15,7 @@ const DEFAULT_CONFIG = {
   peerEdge: 'right',
 
   // Sensibilidad del mouse remoto (1 = 1:1). Sube si se siente lento (ej. 1.25–1.5).
-  moveScale: 1.25,
+  moveScale: 1.35,
 
   // Atajo de emergencia para forzar la vuelta del mouse a esta máquina.
   controlHotkey: 'Control+Alt+K',

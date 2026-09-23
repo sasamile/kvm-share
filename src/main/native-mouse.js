@@ -51,9 +51,6 @@ function createDarwin() {
   const cg = koffi.load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics');
   const CGPoint = koffi.struct('CGPoint', { x: 'double', y: 'double' });
   const CGWarpMouseCursorPosition = cg.func('int CGWarpMouseCursorPosition(CGPoint point)');
-  const CGAssociateMouseAndMouseCursorPosition = cg.func(
-    'int CGAssociateMouseAndMouseCursorPosition(uint32_t connected)',
-  );
   const CGEventCreate = cg.func('void *CGEventCreate(void *source)');
   const CGEventGetLocation = cg.func('CGPoint CGEventGetLocation(void *event)');
   const CFRelease = koffi.load('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
@@ -92,8 +89,8 @@ function createDarwin() {
       return { x: loc.x, y: loc.y };
     },
     setPosition(x, y) {
+      // Solo warp. NO llamar CGAssociate en cada frame: pelea con el cursor y lo “bloquea”.
       CGWarpMouseCursorPosition({ x: Number(x), y: Number(y) });
-      CGAssociateMouseAndMouseCursorPosition(1);
     },
     virtualBounds: electronVirtualBounds,
   };

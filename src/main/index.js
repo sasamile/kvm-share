@@ -95,7 +95,7 @@ function flushMoves(peer, edge) {
 
 app.whenReady().then(() => {
   const config = loadConfig();
-  setMoveScale(config.moveScale ?? 1.25);
+  setMoveScale(config.moveScale ?? 1.35);
   overlayWindow = createOverlayWindow();
 
   const peer = new Peer(config);
@@ -107,19 +107,17 @@ app.whenReady().then(() => {
     peer,
     onStatus: (text) => tray.setControlStatus(text),
     onEnterRemote: () => {
-      clipboardSync.setPaused(true);
+      // Portapapeles sigue activo para copiar/pegar entre PCs.
       showOverlay();
     },
     onLeaveRemote: () => {
       hideOverlay();
-      clipboardSync.setPaused(false);
     },
   });
 
   setLeaveEdgeHandler((msg) => {
     peer.send(msg);
     edge.setReceiving(false);
-    clipboardSync.setPaused(false);
   });
 
   peer.on('status', (text) => tray.setNetworkStatus(text));
@@ -141,14 +139,12 @@ app.whenReady().then(() => {
 
       if (msg.t === 'control-start') {
         edge.setReceiving(true);
-        clipboardSync.setPaused(true);
         handleRemoteMessage(msg);
         return;
       }
 
       if (msg.t === 'control-end') {
         edge.setReceiving(false);
-        clipboardSync.setPaused(false);
         return;
       }
 

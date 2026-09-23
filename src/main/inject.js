@@ -6,10 +6,9 @@ keyboard.config.autoDelayMs = 0;
 
 const BUTTON_MAP = { 0: Button.LEFT, 1: Button.MIDDLE, 2: Button.RIGHT };
 
-const ENTRY_INSET = 12;
-const Y_MARGIN = 20;
-const LEAVE_OVERSHOOT = 18;
-const LEAVE_GRACE_MS = 150;
+const ENTRY_INSET = 10;
+const LEAVE_OVERSHOOT = 40;
+const LEAVE_GRACE_MS = 250;
 
 let cachedPos = null;
 let entryEdge = 'left';
@@ -18,6 +17,8 @@ let leaveArmedAt = 0;
 let overshoot = 0;
 let leaving = false;
 let moveScale = 1.0;
+// En Mac: Ctrl (Windows) se inyecta como Cmd.
+const ctrlAsMeta = process.platform === 'darwin';
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
@@ -33,15 +34,16 @@ function setMoveScale(value) {
 }
 
 function entryPoint(bounds, edge, ratioY, ratioX) {
+  // Sin márgenes artificiales: hay que poder llegar al Dock / barra de menú.
   const y = clamp(
     Math.round(bounds.minY + (typeof ratioY === 'number' ? ratioY : 0.5) * bounds.height),
-    bounds.minY + Y_MARGIN,
-    bounds.maxY - 1 - Y_MARGIN,
+    bounds.minY,
+    bounds.maxY - 1,
   );
   const x = clamp(
     Math.round(bounds.minX + (typeof ratioX === 'number' ? ratioX : 0.5) * bounds.width),
-    bounds.minX + Y_MARGIN,
-    bounds.maxX - 1 - Y_MARGIN,
+    bounds.minX,
+    bounds.maxX - 1,
   );
 
   switch (edge) {
@@ -63,8 +65,6 @@ function resetCursor(msg = {}) {
   leaveArmedAt = Date.now() + LEAVE_GRACE_MS;
   overshoot = 0;
   leaving = false;
-  // movementX/Y ya es relativo: NO escalar por ancho de escritorio (eso hacía
-  // el cursor lentísimo / “no pasa de media pantalla” con varios monitores).
   cachedPos = entryPoint(bounds, entryEdge, msg.exitYRatio, msg.exitXRatio);
   nativeMouse.setPosition(cachedPos.x, cachedPos.y);
 }
@@ -85,15 +85,17 @@ function pushTowardLeave(dx, dy) {
 }
 
 function pastLeaveLine(x, y, bounds) {
+  // Solo cuenta como “salir” si se pasa claramente del borde (evita bloquear esquinas/Dock).
+  const pad = 2;
   switch (entryEdge) {
     case 'left':
-      return x <= bounds.minX;
+      return x < bounds.minX - pad;
     case 'right':
-      return x >= bounds.maxX - 1;
+      return x > bounds.maxX - 1 + pad;
     case 'top':
-      return y <= bounds.minY;
+      return y < bounds.minY - pad;
     case 'bottom':
-      return y >= bounds.maxY - 1;
+      return y > bounds.maxY - 1 + pad;
     default:
       return false;
   }
@@ -105,8 +107,8 @@ function handleMousemove(msg) {
   const bounds = nativeMouse.virtualBounds();
   const dx = (msg.dx || 0) * moveScale;
   const dy = (msg.dy || 0) * moveScale;
-  const nextX = cachedPos.x + dx;
-  const nextY = cachedPos.y + dy;
+  let nextX = cachedPos.x + dx;
+  let nextY = cachedPos.y + dy;
 
   const graceDone = Date.now() >= leaveArmedAt;
   if (graceDone && pastLeaveLine(nextX, nextY, bounds)) {
@@ -132,20 +134,14 @@ function handleMousemove(msg) {
       }
       return;
     }
-    cachedPos = {
-      x: clamp(nextX, bounds.minX, bounds.maxX - 1),
-      y: clamp(nextY, bounds.minY, bounds.maxY - 1),
-    };
-    nativeMouse.setPosition(cachedPos.x, cachedPos.y);
-    return;
+  } else if (pushTowardLeave(dx, dy) === 0) {
+    overshoot = 0;
   }
 
-  if (pushTowardLeave(dx, dy) === 0) overshoot = 0;
-
-  cachedPos = {
-    x: clamp(nextX, bounds.minX, bounds.maxX - 1),
-    y: clamp(nextY, bounds.minY, bounds.maxY - 1),
-  };
+  // Siempre se puede recorrer toda la pantalla (incluido Dock abajo / menú arriba).
+  nextX = clamp(nextX, bounds.minX, bounds.maxX - 1);
+  nextY = clamp(nextY, bounds.minY, bounds.maxY - 1);
+  cachedPos = { x: nextX, y: nextY };
   nativeMouse.setPosition(cachedPos.x, cachedPos.y);
 }
 
@@ -189,13 +185,13 @@ function handleRemoteMessage(msg) {
     }
 
     case 'keydown': {
-      const key = mapCodeToKey(msg.code);
+      const key = mapCodeToKey(msg.code, { ctrlAsMeta });
       if (key !== null) keyboard.pressKey(key).catch(() => {});
       return;
     }
 
     case 'keyup': {
-      const key = mapCodeToKey(msg.code);
+      const key = mapCodeToKey(msg.code, { ctrlAsMeta });
       if (key !== null) keyboard.releaseKey(key).catch(() => {});
       return;
     }
@@ -205,9 +201,7 @@ function handleRemoteMessage(msg) {
   }
 }
 
-function invalidateBoundsCache() {
-  // native GetSystemMetrics no cachea; no-op para compat.
-}
+function invalidateBoundsCache() {}
 
 module.exports = {
   handleRemoteMessage,
