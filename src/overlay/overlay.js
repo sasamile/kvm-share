@@ -38,12 +38,17 @@ window.kvm.onActiveChange((isActive) => {
     hint.style.display = 'block';
     hintTimer = setTimeout(() => {
       hint.style.display = 'none';
-    }, 1800);
-    try {
-      document.body.requestPointerLock();
-    } catch (_) {
-      /* ignore */
-    }
+    }, 1400);
+    // Pointer Lock = movimiento relativo fluido (sin pelear con bordes).
+    const tryLock = () => {
+      try {
+        document.body.requestPointerLock();
+      } catch (_) {
+        /* ignore */
+      }
+    };
+    tryLock();
+    setTimeout(tryLock, 50);
   } else {
     hint.style.display = 'none';
     if (document.pointerLockElement) {
@@ -67,6 +72,7 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('mousedown', (e) => {
   if (!active) return;
   e.preventDefault();
+  flushMove();
   window.kvm.sendInput({ t: 'mousedown', button: e.button });
 });
 

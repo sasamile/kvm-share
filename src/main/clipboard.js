@@ -1,14 +1,13 @@
 const { clipboard } = require('electron');
 
-const POLL_INTERVAL_MS = 150;
+const POLL_INTERVAL_MS = 900;
 
-// Sincroniza solo texto por simplicidad (v1). Sondea el portapapeles local
-// porque ni macOS ni Windows exponen un evento nativo de "cambio de portapapeles"
-// sin módulos nativos adicionales.
 function startClipboardSync(peer) {
   let lastText = clipboard.readText();
+  let paused = false;
 
   const timer = setInterval(() => {
+    if (paused) return;
     const text = clipboard.readText();
     if (text !== lastText && text !== '') {
       lastText = text;
@@ -18,12 +17,15 @@ function startClipboardSync(peer) {
 
   function applyRemote(text) {
     if (text === lastText) return;
-    lastText = text; // evita reenviarlo de vuelta en el próximo sondeo
+    lastText = text;
     clipboard.writeText(text);
   }
 
   return {
     applyRemote,
+    setPaused(value) {
+      paused = !!value;
+    },
     stop: () => clearInterval(timer),
   };
 }

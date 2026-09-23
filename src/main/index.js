@@ -5,13 +5,18 @@ const { loadConfig } = require('./config');
 const { Peer } = require('./network');
 const { createTray } = require('./tray');
 const { startClipboardSync } = require('./clipboard');
-const { handleRemoteMessage, setLeaveEdgeHandler } = require('./inject');
+const { handleRemoteMessage, setLeaveEdgeHandler, invalidateBoundsCache } = require('./inject');
 const { startEdgeControl, virtualBounds } = require('./edge');
 
 if (app.dock) app.dock.hide();
 
+// Menos throttling del renderer = overlay más fluido con pointer lock.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+
 let overlayWindow = null;
-let recenterTimer = null;
+let moveAcc = { dx: 0, dy: 0 };
+let moveFlushTimer = null;
 
 function createOverlayWindow() {
   const b = virtualBounds();
@@ -30,10 +35,12 @@ function createOverlayWindow() {
     show: false,
     alwaysOnTop: true,
     focusable: true,
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, '..', 'overlay', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   });
   win.setAlwaysOnTop(true, 'screen-saver');
@@ -49,38 +56,39 @@ function showOverlay() {
   overlayWindow.show();
   overlayWindow.focus();
   overlayWindow.webContents.send('overlay-active', true);
-  // Sacar el cursor del borde: si se queda en la esquina, Windows no genera más movimiento.
+
+  // Un solo centrado al entrar. El Pointer Lock ya da movimiento relativo sin recentrar.
   const { mouse, Point } = require('@nut-tree-fork/nut-js');
   const cx = Math.round(b.minX + b.width / 2);
   const cy = Math.round(b.minY + b.height / 2);
   mouse.setPosition(new Point(cx, cy)).catch(() => {});
-
-  // Recentrar solo si se pega al borde (Windows deja de emitir movementX/Y).
-  if (recenterTimer) clearInterval(recenterTimer);
-  recenterTimer = setInterval(() => {
-    mouse.getPosition().then((pos) => {
-      const edge = 24;
-      if (
-        pos.x <= b.minX + edge ||
-        pos.x >= b.maxX - edge ||
-        pos.y <= b.minY + edge ||
-        pos.y >= b.maxY - edge
-      ) {
-        return mouse.setPosition(new Point(cx, cy));
-      }
-      return null;
-    }).catch(() => {});
-  }, 120);
 }
 
 function hideOverlay() {
-  if (recenterTimer) {
-    clearInterval(recenterTimer);
-    recenterTimer = null;
+  moveAcc.dx = 0;
+  moveAcc.dy = 0;
+  if (moveFlushTimer) {
+    clearTimeout(moveFlushTimer);
+    moveFlushTimer = null;
   }
   if (!overlayWindow) return;
   overlayWindow.webContents.send('overlay-active', false);
   overlayWindow.hide();
+}
+
+function flushMoves(peer, edge) {
+  moveFlushTimer = null;
+  if (!edge.isSending()) {
+    moveAcc.dx = 0;
+    moveAcc.dy = 0;
+    return;
+  }
+  const dx = moveAcc.dx;
+  const dy = moveAcc.dy;
+  moveAcc.dx = 0;
+  moveAcc.dy = 0;
+  if (dx === 0 && dy === 0) return;
+  peer.send({ t: 'mousemove', dx, dy });
 }
 
 app.whenReady().then(() => {
@@ -95,13 +103,20 @@ app.whenReady().then(() => {
     config,
     peer,
     onStatus: (text) => tray.setControlStatus(text),
-    onEnterRemote: () => showOverlay(),
-    onLeaveRemote: () => hideOverlay(),
+    onEnterRemote: () => {
+      clipboardSync.setPaused(true);
+      showOverlay();
+    },
+    onLeaveRemote: () => {
+      hideOverlay();
+      clipboardSync.setPaused(false);
+    },
   });
 
   setLeaveEdgeHandler((msg) => {
     peer.send(msg);
     edge.setReceiving(false);
+    clipboardSync.setPaused(false);
   });
 
   peer.on('status', (text) => tray.setNetworkStatus(text));
@@ -112,31 +127,46 @@ app.whenReady().then(() => {
       return;
     }
 
+    // Camino rápido: mousemove sin promesas.
+    if (msg.t === 'mousemove') {
+      if (edge.isReceiving()) handleRemoteMessage(msg);
+      return;
+    }
+
     edge.handlePeerMessage(msg).then((handled) => {
       if (handled) return;
 
       if (msg.t === 'control-start') {
         edge.setReceiving(true);
-        return handleRemoteMessage(msg).catch((err) => {
-          console.error('Error inyectando input remoto:', err);
-        });
+        clipboardSync.setPaused(true);
+        handleRemoteMessage(msg);
+        return;
       }
 
       if (msg.t === 'control-end') {
         edge.setReceiving(false);
+        clipboardSync.setPaused(false);
         return;
       }
 
       if (!edge.isReceiving()) return;
-
-      return handleRemoteMessage(msg).catch((err) => {
-        console.error('Error inyectando input remoto:', err);
-      });
+      handleRemoteMessage(msg);
     });
   });
 
   ipcMain.on('overlay-input', (_event, data) => {
     if (!edge.isSending()) return;
+    if (data.t === 'mousemove') {
+      moveAcc.dx += data.dx || 0;
+      moveAcc.dy += data.dy || 0;
+      if (!moveFlushTimer) {
+        // ~125 Hz: menos paquetes, más fluido que 1 msg por pixel.
+        moveFlushTimer = setTimeout(() => flushMoves(peer, edge), 8);
+      }
+      return;
+    }
+    // Clic/tecla: vaciar movimiento pendiente primero.
+    flushMoves(peer, edge);
     peer.send(data);
   });
 
@@ -165,6 +195,7 @@ app.whenReady().then(() => {
   }
 
   screen.on('display-metrics-changed', () => {
+    invalidateBoundsCache();
     if (overlayWindow && overlayWindow.isVisible()) {
       const b = virtualBounds();
       overlayWindow.setBounds({ x: b.minX, y: b.minY, width: b.width, height: b.height });
