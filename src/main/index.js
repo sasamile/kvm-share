@@ -5,8 +5,9 @@ const { loadConfig } = require('./config');
 const { Peer } = require('./network');
 const { createTray } = require('./tray');
 const { startClipboardSync } = require('./clipboard');
-const { handleRemoteMessage, setLeaveEdgeHandler, invalidateBoundsCache } = require('./inject');
+const { handleRemoteMessage, setLeaveEdgeHandler, invalidateBoundsCache, setMoveScale } = require('./inject');
 const { startEdgeControl, virtualBounds } = require('./edge');
+const nativeMouse = require('./native-mouse');
 
 if (app.dock) app.dock.hide();
 
@@ -57,11 +58,12 @@ function showOverlay() {
   overlayWindow.focus();
   overlayWindow.webContents.send('overlay-active', true);
 
-  // Un solo centrado al entrar. El Pointer Lock ya da movimiento relativo sin recentrar.
-  const { mouse, Point } = require('@nut-tree-fork/nut-js');
-  const cx = Math.round(b.minX + b.width / 2);
-  const cy = Math.round(b.minY + b.height / 2);
-  mouse.setPosition(new Point(cx, cy)).catch(() => {});
+  // Centrar en coords nativas (físicas en Windows) — un solo salto, sin timer.
+  const nb = nativeMouse.virtualBounds();
+  nativeMouse.setPosition(
+    Math.round((nb.minX + nb.maxX) / 2),
+    Math.round((nb.minY + nb.maxY) / 2),
+  );
 }
 
 function hideOverlay() {
@@ -93,6 +95,7 @@ function flushMoves(peer, edge) {
 
 app.whenReady().then(() => {
   const config = loadConfig();
+  setMoveScale(config.moveScale ?? 1.25);
   overlayWindow = createOverlayWindow();
 
   const peer = new Peer(config);
@@ -160,8 +163,8 @@ app.whenReady().then(() => {
       moveAcc.dx += data.dx || 0;
       moveAcc.dy += data.dy || 0;
       if (!moveFlushTimer) {
-        // ~125 Hz: menos paquetes, más fluido que 1 msg por pixel.
-        moveFlushTimer = setTimeout(() => flushMoves(peer, edge), 8);
+        // ~200 Hz de envío coalescido (SetCursorPos aguanta; nut-js no).
+        moveFlushTimer = setTimeout(() => flushMoves(peer, edge), 5);
       }
       return;
     }

@@ -1,37 +1,9 @@
-const { mouse, Point } = require('@nut-tree-fork/nut-js');
-const { screen: electronScreen } = require('electron');
+const nativeMouse = require('./native-mouse');
 
-mouse.config.autoDelayMs = 0;
-mouse.config.mouseSpeed = 10000;
-
-const POLL_MS = 8;
-const EDGE_PX = 2;
-// Al volver, deja el cursor casi en el borde (sin “salto” grande).
-const PARK_MARGIN = 6;
-const COOLDOWN_MS = 120;
-
-function virtualBounds() {
-  const displays = electronScreen.getAllDisplays();
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const d of displays) {
-    const b = d.bounds;
-    minX = Math.min(minX, b.x);
-    minY = Math.min(minY, b.y);
-    maxX = Math.max(maxX, b.x + b.width);
-    maxY = Math.max(maxY, b.y + b.height);
-  }
-  return {
-    minX,
-    minY,
-    maxX,
-    maxY,
-    width: maxX - minX,
-    height: maxY - minY,
-  };
-}
+const POLL_MS = 12;
+const EDGE_PX = 4;
+const PARK_MARGIN = 10;
+const COOLDOWN_MS = 180;
 
 function oppositeEdge(edge) {
   return { left: 'right', right: 'left', top: 'bottom', bottom: 'top' }[edge] || 'left';
@@ -52,10 +24,6 @@ function hitExitEdge(pos, bounds, edge) {
   }
 }
 
-/**
- * Detecta salida por el borde. Al cruzar, avisa para capturar input
- * (overlay sin Pointer Lock). No esconde el cursor del sistema.
- */
 function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote }) {
   const peerEdge = config.peerEdge || 'right';
   let sending = false;
@@ -63,19 +31,18 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
   let timer = null;
   let exitY = 0;
   let exitX = 0;
-  let busy = false;
   let cooldownUntil = 0;
 
   function setStatus(text) {
     if (onStatus) onStatus(text);
   }
 
-  async function beginSending(pos) {
+  function beginSending(pos) {
     if (sending || receiving || !peer.connected) return;
     sending = true;
     exitX = pos.x;
     exitY = pos.y;
-    const vb = virtualBounds();
+    const vb = nativeMouse.virtualBounds();
     setStatus('remoto (enviando)');
     peer.send({
       t: 'control-start',
@@ -89,14 +56,14 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
     console.log(`[edge] saliendo por ${peerEdge} → control remoto`);
   }
 
-  async function endSending(placeLocal = true) {
+  function endSending(placeLocal = true) {
     if (!sending) return;
     sending = false;
     setStatus('local');
     peer.send({ t: 'control-end' });
     if (onLeaveRemote) onLeaveRemote();
     if (placeLocal) {
-      const b = virtualBounds();
+      const b = nativeMouse.virtualBounds();
       let x = exitX;
       let y = exitY;
       switch (peerEdge) {
@@ -116,7 +83,7 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
           break;
       }
       try {
-        await mouse.setPosition(new Point(x, y));
+        nativeMouse.setPosition(x, y);
       } catch (_) {
         /* ignore */
       }
@@ -125,26 +92,22 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
     cooldownUntil = Date.now() + COOLDOWN_MS;
   }
 
-  async function tick() {
-    if (busy || receiving || sending) return;
-    busy = true;
+  function tick() {
+    if (receiving || sending) return;
+    if (Date.now() < cooldownUntil) return;
     try {
-      const pos = await mouse.getPosition();
-      const bounds = virtualBounds();
-      if (Date.now() < cooldownUntil) return;
+      const pos = nativeMouse.getPosition();
+      if (!pos) return;
+      const bounds = nativeMouse.virtualBounds();
       if (peer.connected && hitExitEdge(pos, bounds, peerEdge)) {
-        await beginSending(pos);
+        beginSending(pos);
       }
     } catch (err) {
       console.error('[edge] tick error:', err.message);
-    } finally {
-      busy = false;
     }
   }
 
-  timer = setInterval(() => {
-    tick();
-  }, POLL_MS);
+  timer = setInterval(tick, POLL_MS);
 
   return {
     isSending: () => sending,
@@ -165,13 +128,12 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
     },
 
     async forceReturn() {
-      // Siempre ocultar overlay, aunque el estado haya quedado raro.
       if (!sending) {
         if (onLeaveRemote) onLeaveRemote();
         setStatus('local');
         return;
       }
-      await endSending(true);
+      endSending(true);
     },
 
     async forceStart() {
@@ -182,8 +144,8 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
         return false;
       }
       try {
-        const pos = await mouse.getPosition();
-        await beginSending(pos);
+        const pos = nativeMouse.getPosition() || { x: 0, y: 0 };
+        beginSending(pos);
         return true;
       } catch (err) {
         console.error('[edge] forceStart:', err.message);
@@ -193,8 +155,7 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
 
     async handlePeerMessage(msg) {
       if (msg.t === 'edge-return') {
-        const b = virtualBounds();
-        // Ratios del peer → posición local (evita mezclar coordenadas de otra resolución).
+        const b = nativeMouse.virtualBounds();
         if (typeof msg.returnYRatio === 'number') {
           exitY = b.minY + msg.returnYRatio * b.height;
         } else if (typeof msg.returnY === 'number') {
@@ -205,11 +166,11 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
         } else if (typeof msg.returnX === 'number') {
           exitX = msg.returnX;
         }
-        await endSending(true);
+        endSending(true);
         return true;
       }
       if (msg.t === 'control-end' && sending) {
-        await endSending(true);
+        endSending(true);
         return true;
       }
       return false;
@@ -222,4 +183,8 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
   };
 }
 
-module.exports = { startEdgeControl, virtualBounds, oppositeEdge };
+module.exports = {
+  startEdgeControl,
+  virtualBounds: () => nativeMouse.electronOverlayBounds(),
+  oppositeEdge,
+};

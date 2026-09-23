@@ -14,6 +14,9 @@ const DEFAULT_CONFIG = {
   // Por qué borde de TUS pantallas se sale hacia el otro PC: "left" | "right" | "top" | "bottom".
   peerEdge: 'right',
 
+  // Sensibilidad del mouse remoto (1 = 1:1). Sube si se siente lento (ej. 1.25–1.5).
+  moveScale: 1.25,
+
   // Atajo de emergencia para forzar la vuelta del mouse a esta máquina.
   controlHotkey: 'Control+Alt+K',
 };

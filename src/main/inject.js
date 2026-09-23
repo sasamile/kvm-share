@@ -1,62 +1,35 @@
-const { mouse, keyboard, Button, Point } = require('@nut-tree-fork/nut-js');
-const { screen: electronScreen } = require('electron');
+const { keyboard, Button } = require('@nut-tree-fork/nut-js');
 const { mapCodeToKey } = require('./keymap');
+const nativeMouse = require('./native-mouse');
 
-mouse.config.autoDelayMs = 0;
-mouse.config.mouseSpeed = 10000;
 keyboard.config.autoDelayMs = 0;
 
 const BUTTON_MAP = { 0: Button.LEFT, 1: Button.MIDDLE, 2: Button.RIGHT };
 
-const ENTRY_INSET = 8;
-const Y_MARGIN = 24;
-const LEAVE_OVERSHOOT = 14;
-const LEAVE_GRACE_MS = 120;
-const BASE_MOVE_SCALE = 1.0;
+const ENTRY_INSET = 12;
+const Y_MARGIN = 20;
+const LEAVE_OVERSHOOT = 18;
+const LEAVE_GRACE_MS = 150;
 
 let cachedPos = null;
 let entryEdge = 'left';
 let onLeaveEdge = null;
 let leaveArmedAt = 0;
 let overshoot = 0;
-let scaleX = BASE_MOVE_SCALE;
-let scaleY = BASE_MOVE_SCALE;
-let pendingPos = null;
-let writing = false;
-let cachedBounds = null;
 let leaving = false;
+let moveScale = 1.0;
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
-function computeVirtualBounds() {
-  const displays = electronScreen.getAllDisplays();
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const d of displays) {
-    const b = d.bounds;
-    minX = Math.min(minX, b.x);
-    minY = Math.min(minY, b.y);
-    maxX = Math.max(maxX, b.x + b.width);
-    maxY = Math.max(maxY, b.y + b.height);
-  }
-  return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
-}
-
-function virtualBounds() {
-  if (!cachedBounds) cachedBounds = computeVirtualBounds();
-  return cachedBounds;
-}
-
-function invalidateBoundsCache() {
-  cachedBounds = null;
-}
-
 function setLeaveEdgeHandler(fn) {
   onLeaveEdge = fn;
+}
+
+function setMoveScale(value) {
+  const n = Number(value);
+  moveScale = Number.isFinite(n) && n > 0 ? n : 1.0;
 }
 
 function entryPoint(bounds, edge, ratioY, ratioX) {
@@ -73,54 +46,27 @@ function entryPoint(bounds, edge, ratioY, ratioX) {
 
   switch (edge) {
     case 'right':
-      return new Point(bounds.maxX - 1 - ENTRY_INSET, y);
+      return { x: bounds.maxX - 1 - ENTRY_INSET, y };
     case 'top':
-      return new Point(x, bounds.minY + ENTRY_INSET);
+      return { x, y: bounds.minY + ENTRY_INSET };
     case 'bottom':
-      return new Point(x, bounds.maxY - 1 - ENTRY_INSET);
+      return { x, y: bounds.maxY - 1 - ENTRY_INSET };
     case 'left':
     default:
-      return new Point(bounds.minX + ENTRY_INSET, y);
+      return { x: bounds.minX + ENTRY_INSET, y };
   }
 }
 
-function flushPosition() {
-  if (writing || !pendingPos) return;
-  writing = true;
-  const point = pendingPos;
-  pendingPos = null;
-  // No await en cadena: aplica y sigue; si hay más, un tick después.
-  Promise.resolve(mouse.setPosition(point))
-    .catch(() => {})
-    .finally(() => {
-      writing = false;
-      if (pendingPos) setImmediate(flushPosition);
-    });
-}
-
-function queuePosition(point) {
-  cachedPos = point;
-  pendingPos = point;
-  flushPosition();
-}
-
 function resetCursor(msg = {}) {
-  invalidateBoundsCache();
-  const bounds = virtualBounds();
+  const bounds = nativeMouse.virtualBounds();
   entryEdge = msg.entryEdge || 'left';
   leaveArmedAt = Date.now() + LEAVE_GRACE_MS;
   overshoot = 0;
   leaving = false;
-
-  const peerH = Number(msg.localHeight) || 0;
-  const peerW = Number(msg.localWidth) || 0;
-  scaleY = peerH > 0 ? (bounds.height / peerH) * BASE_MOVE_SCALE : BASE_MOVE_SCALE;
-  scaleX = peerW > 0 ? (bounds.width / peerW) * BASE_MOVE_SCALE : BASE_MOVE_SCALE;
-
+  // movementX/Y ya es relativo: NO escalar por ancho de escritorio (eso hacía
+  // el cursor lentísimo / “no pasa de media pantalla” con varios monitores).
   cachedPos = entryPoint(bounds, entryEdge, msg.exitYRatio, msg.exitXRatio);
-  pendingPos = null;
-  writing = false;
-  mouse.setPosition(cachedPos).catch(() => {});
+  nativeMouse.setPosition(cachedPos.x, cachedPos.y);
 }
 
 function pushTowardLeave(dx, dy) {
@@ -156,9 +102,9 @@ function pastLeaveLine(x, y, bounds) {
 function handleMousemove(msg) {
   if (leaving) return;
   if (!cachedPos) resetCursor();
-  const bounds = virtualBounds();
-  const dx = (msg.dx || 0) * scaleX;
-  const dy = (msg.dy || 0) * scaleY;
+  const bounds = nativeMouse.virtualBounds();
+  const dx = (msg.dx || 0) * moveScale;
+  const dy = (msg.dy || 0) * moveScale;
   const nextX = cachedPos.x + dx;
   const nextY = cachedPos.y + dy;
 
@@ -175,8 +121,7 @@ function handleMousemove(msg) {
         (returnY - bounds.minY) / Math.max(1, bounds.height),
         (returnX - bounds.minX) / Math.max(1, bounds.width),
       );
-      pendingPos = null;
-      mouse.setPosition(cachedPos).catch(() => {});
+      nativeMouse.setPosition(cachedPos.x, cachedPos.y);
       overshoot = 0;
       if (onLeaveEdge) {
         onLeaveEdge({
@@ -187,19 +132,21 @@ function handleMousemove(msg) {
       }
       return;
     }
-    queuePosition(new Point(
-      clamp(nextX, bounds.minX, bounds.maxX - 1),
-      clamp(nextY, bounds.minY, bounds.maxY - 1),
-    ));
+    cachedPos = {
+      x: clamp(nextX, bounds.minX, bounds.maxX - 1),
+      y: clamp(nextY, bounds.minY, bounds.maxY - 1),
+    };
+    nativeMouse.setPosition(cachedPos.x, cachedPos.y);
     return;
   }
 
   if (pushTowardLeave(dx, dy) === 0) overshoot = 0;
 
-  queuePosition(new Point(
-    clamp(nextX, bounds.minX, bounds.maxX - 1),
-    clamp(nextY, bounds.minY, bounds.maxY - 1),
-  ));
+  cachedPos = {
+    x: clamp(nextX, bounds.minX, bounds.maxX - 1),
+    y: clamp(nextY, bounds.minY, bounds.maxY - 1),
+  };
+  nativeMouse.setPosition(cachedPos.x, cachedPos.y);
 }
 
 function handleRemoteMessage(msg) {
@@ -214,17 +161,27 @@ function handleRemoteMessage(msg) {
 
     case 'mousedown': {
       const button = BUTTON_MAP[msg.button];
-      if (button !== undefined) mouse.pressButton(button).catch(() => {});
+      if (button !== undefined) {
+        const { mouse } = require('@nut-tree-fork/nut-js');
+        mouse.config.autoDelayMs = 0;
+        mouse.pressButton(button).catch(() => {});
+      }
       return;
     }
 
     case 'mouseup': {
       const button = BUTTON_MAP[msg.button];
-      if (button !== undefined) mouse.releaseButton(button).catch(() => {});
+      if (button !== undefined) {
+        const { mouse } = require('@nut-tree-fork/nut-js');
+        mouse.config.autoDelayMs = 0;
+        mouse.releaseButton(button).catch(() => {});
+      }
       return;
     }
 
     case 'wheel': {
+      const { mouse } = require('@nut-tree-fork/nut-js');
+      mouse.config.autoDelayMs = 0;
       const steps = Math.max(1, Math.round(Math.abs(msg.dy) / 40));
       if (msg.dy > 0) mouse.scrollDown(steps).catch(() => {});
       else if (msg.dy < 0) mouse.scrollUp(steps).catch(() => {});
@@ -248,4 +205,13 @@ function handleRemoteMessage(msg) {
   }
 }
 
-module.exports = { handleRemoteMessage, setLeaveEdgeHandler, invalidateBoundsCache };
+function invalidateBoundsCache() {
+  // native GetSystemMetrics no cachea; no-op para compat.
+}
+
+module.exports = {
+  handleRemoteMessage,
+  setLeaveEdgeHandler,
+  invalidateBoundsCache,
+  setMoveScale,
+};
