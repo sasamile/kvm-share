@@ -1,6 +1,6 @@
 const { clipboard } = require('electron');
 
-const POLL_INTERVAL_MS = 700;
+const POLL_INTERVAL_MS = 150;
 
 // Sincroniza solo texto por simplicidad (v1). Sondea el portapapeles local
 // porque ni macOS ni Windows exponen un evento nativo de "cambio de portapapeles"

@@ -72,8 +72,15 @@ En la bandeja debe decir **Peer conectado** / **Conectado a…** antes de probar
   en `scripts/postinstall.sh`).
 - **Windows:** aceptar el Firewall en redes privadas.
 
+## Fluidez del paso entre PCs
+
+El cursor entra/sale cerca del borde (sin saltar ~160px adentro), la vuelta por borde
+pide poco empuje, y los movimientos se envían por frame (~60 Hz) sin acumular retraso
+en la inyección. Si aún se siente lento, revisa Wi‑Fi (mejor Ethernet/LAN cableada) y
+que ambas apps digan **Peer conectado**.
+
 ## Limitaciones
 
-- Al controlar el otro PC hay un overlay semitransparente local; el cursor “útil” se ve
+- Al controlar el otro PC hay un overlay casi invisible local; el cursor “útil” se ve
   en la otra pantalla.
 - Portapapeles solo texto; sin cifrado (solo LAN de confianza).

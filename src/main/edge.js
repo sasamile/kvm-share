@@ -4,9 +4,11 @@ const { screen: electronScreen } = require('electron');
 mouse.config.autoDelayMs = 0;
 mouse.config.mouseSpeed = 10000;
 
-const POLL_MS = 10;
-const EDGE_PX = 3;
-const PARK_MARGIN = 80;
+const POLL_MS = 8;
+const EDGE_PX = 2;
+// Al volver, deja el cursor casi en el borde (sin “salto” grande).
+const PARK_MARGIN = 6;
+const COOLDOWN_MS = 120;
 
 function virtualBounds() {
   const displays = electronScreen.getAllDisplays();
@@ -120,7 +122,7 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
       }
     }
     console.log('[edge] control local');
-    cooldownUntil = Date.now() + 600;
+    cooldownUntil = Date.now() + COOLDOWN_MS;
   }
 
   async function tick() {
@@ -168,8 +170,18 @@ function startEdgeControl({ config, peer, onStatus, onEnterRemote, onLeaveRemote
 
     async handlePeerMessage(msg) {
       if (msg.t === 'edge-return') {
-        exitX = typeof msg.returnX === 'number' ? msg.returnX : exitX;
-        exitY = typeof msg.returnY === 'number' ? msg.returnY : exitY;
+        const b = virtualBounds();
+        // Ratios del peer → posición local (evita mezclar coordenadas de otra resolución).
+        if (typeof msg.returnYRatio === 'number') {
+          exitY = b.minY + msg.returnYRatio * b.height;
+        } else if (typeof msg.returnY === 'number') {
+          exitY = msg.returnY;
+        }
+        if (typeof msg.returnXRatio === 'number') {
+          exitX = b.minX + msg.returnXRatio * b.width;
+        } else if (typeof msg.returnX === 'number') {
+          exitX = msg.returnX;
+        }
         await endSending(true);
         return true;
       }

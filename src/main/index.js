@@ -55,10 +55,11 @@ function showOverlay() {
   const cy = Math.round(b.minY + b.height / 2);
   mouse.setPosition(new Point(cx, cy)).catch(() => {});
 
+  // Recentrar solo si se pega al borde (Windows deja de emitir movementX/Y).
   if (recenterTimer) clearInterval(recenterTimer);
   recenterTimer = setInterval(() => {
     mouse.getPosition().then((pos) => {
-      const edge = 40;
+      const edge = 24;
       if (
         pos.x <= b.minX + edge ||
         pos.x >= b.maxX - edge ||
@@ -69,7 +70,7 @@ function showOverlay() {
       }
       return null;
     }).catch(() => {});
-  }, 200);
+  }, 120);
 }
 
 function hideOverlay() {

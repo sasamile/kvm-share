@@ -8,22 +8,25 @@ keyboard.config.autoDelayMs = 0;
 
 const BUTTON_MAP = { 0: Button.LEFT, 1: Button.MIDDLE, 2: Button.RIGHT };
 
-// Entrar bien dentro de la pantalla (no en la esquina).
-const ENTRY_INSET = 160;
-// Margen superior/inferior para no pegarse a las esquinas.
-const Y_MARGIN = 40;
-// Hay que “empujar” past el borde esta cantidad antes de volver.
-const LEAVE_OVERSHOOT = 60;
-// No permitir volver en los primeros ms (evita rebote en la esquina).
-const LEAVE_GRACE_MS = 900;
-// Amplifica un poco el movimiento para que se sienta más natural.
-const MOVE_SCALE = 1.35;
+// Casi en el borde: el cursor aparece en la “costura” entre pantallas.
+const ENTRY_INSET = 4;
+const Y_MARGIN = 24;
+// Empuje mínimo past el borde para volver (Synergy-like).
+const LEAVE_OVERSHOOT = 10;
+// Evita rebote inmediato al entrar, sin bloquear la vuelta.
+const LEAVE_GRACE_MS = 100;
+// Sensibilidad base; se ajusta con la proporción de resoluciones.
+const BASE_MOVE_SCALE = 1.0;
 
 let cachedPos = null;
 let entryEdge = 'left';
 let onLeaveEdge = null;
 let leaveArmedAt = 0;
 let overshoot = 0;
+let scaleX = BASE_MOVE_SCALE;
+let scaleY = BASE_MOVE_SCALE;
+let pendingPos = null;
+let writing = false;
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
@@ -49,24 +52,49 @@ function setLeaveEdgeHandler(fn) {
   onLeaveEdge = fn;
 }
 
-function entryPoint(bounds, edge, ratioY) {
+function entryPoint(bounds, edge, ratioY, ratioX) {
   const y = clamp(
     Math.round(bounds.minY + (typeof ratioY === 'number' ? ratioY : 0.5) * bounds.height),
     bounds.minY + Y_MARGIN,
     bounds.maxY - 1 - Y_MARGIN,
   );
-  const midX = Math.round(bounds.minX + bounds.width / 2);
+  const x = clamp(
+    Math.round(bounds.minX + (typeof ratioX === 'number' ? ratioX : 0.5) * bounds.width),
+    bounds.minX + Y_MARGIN,
+    bounds.maxX - 1 - Y_MARGIN,
+  );
 
   switch (edge) {
     case 'right':
       return new Point(bounds.maxX - 1 - ENTRY_INSET, y);
     case 'top':
-      return new Point(midX, bounds.minY + ENTRY_INSET);
+      return new Point(x, bounds.minY + ENTRY_INSET);
     case 'bottom':
-      return new Point(midX, bounds.maxY - 1 - ENTRY_INSET);
+      return new Point(x, bounds.maxY - 1 - ENTRY_INSET);
     case 'left':
     default:
       return new Point(bounds.minX + ENTRY_INSET, y);
+  }
+}
+
+function queuePosition(point) {
+  cachedPos = point;
+  pendingPos = point;
+  flushPosition();
+}
+
+async function flushPosition() {
+  if (writing || !pendingPos) return;
+  writing = true;
+  const point = pendingPos;
+  pendingPos = null;
+  try {
+    await mouse.setPosition(point);
+  } catch (_) {
+    /* ignore */
+  } finally {
+    writing = false;
+    if (pendingPos) flushPosition();
   }
 }
 
@@ -75,7 +103,15 @@ async function resetCursor(msg = {}) {
   entryEdge = msg.entryEdge || 'left';
   leaveArmedAt = Date.now() + LEAVE_GRACE_MS;
   overshoot = 0;
-  cachedPos = entryPoint(bounds, entryEdge, msg.exitYRatio);
+
+  // Misma velocidad percibida si las resoluciones difieren.
+  const peerH = Number(msg.localHeight) || 0;
+  const peerW = Number(msg.localWidth) || 0;
+  scaleY = peerH > 0 ? (bounds.height / peerH) * BASE_MOVE_SCALE : BASE_MOVE_SCALE;
+  scaleX = peerW > 0 ? (bounds.width / peerW) * BASE_MOVE_SCALE : BASE_MOVE_SCALE;
+
+  cachedPos = entryPoint(bounds, entryEdge, msg.exitYRatio, msg.exitXRatio);
+  pendingPos = null;
   await mouse.setPosition(cachedPos);
 }
 
@@ -118,8 +154,8 @@ async function handleRemoteMessage(msg) {
     case 'mousemove': {
       if (!cachedPos) await resetCursor();
       const bounds = virtualBounds();
-      const dx = (msg.dx || 0) * MOVE_SCALE;
-      const dy = (msg.dy || 0) * MOVE_SCALE;
+      const dx = (msg.dx || 0) * scaleX;
+      const dy = (msg.dy || 0) * scaleY;
       const nextX = cachedPos.x + dx;
       const nextY = cachedPos.y + dy;
 
@@ -127,32 +163,39 @@ async function handleRemoteMessage(msg) {
       if (graceDone && pastLeaveLine(nextX, nextY, bounds)) {
         overshoot += pushTowardLeave(dx, dy);
         if (overshoot >= LEAVE_OVERSHOOT) {
-          const returnX = clamp(nextX, bounds.minX, bounds.maxX - 1);
           const returnY = clamp(nextY, bounds.minY, bounds.maxY - 1);
-          cachedPos = entryPoint(bounds, entryEdge, (returnY - bounds.minY) / Math.max(1, bounds.height));
+          const returnX = clamp(nextX, bounds.minX, bounds.maxX - 1);
+          cachedPos = entryPoint(
+            bounds,
+            entryEdge,
+            (returnY - bounds.minY) / Math.max(1, bounds.height),
+            (returnX - bounds.minX) / Math.max(1, bounds.width),
+          );
+          pendingPos = null;
           await mouse.setPosition(cachedPos);
           overshoot = 0;
           if (onLeaveEdge) {
-            onLeaveEdge({ t: 'edge-return', returnX, returnY });
+            onLeaveEdge({
+              t: 'edge-return',
+              returnYRatio: (returnY - bounds.minY) / Math.max(1, bounds.height),
+              returnXRatio: (returnX - bounds.minX) / Math.max(1, bounds.width),
+            });
           }
           break;
         }
-        // Pegado al borde pero aún no supera el umbral: mantener en el borde interior.
-        cachedPos = new Point(
+        queuePosition(new Point(
           clamp(nextX, bounds.minX, bounds.maxX - 1),
           clamp(nextY, bounds.minY, bounds.maxY - 1),
-        );
-        await mouse.setPosition(cachedPos);
+        ));
         break;
       }
 
-      // Si se aleja del borde de salida, reinicia el contador.
       if (pushTowardLeave(dx, dy) === 0) overshoot = 0;
 
-      const x = clamp(nextX, bounds.minX, bounds.maxX - 1);
-      const y = clamp(nextY, bounds.minY, bounds.maxY - 1);
-      cachedPos = new Point(x, y);
-      await mouse.setPosition(cachedPos);
+      queuePosition(new Point(
+        clamp(nextX, bounds.minX, bounds.maxX - 1),
+        clamp(nextY, bounds.minY, bounds.maxY - 1),
+      ));
       break;
     }
 

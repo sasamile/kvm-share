@@ -1,17 +1,54 @@
 const hint = document.getElementById('hint');
 let active = false;
+let pendingDx = 0;
+let pendingDy = 0;
+let rafId = 0;
+let hintTimer = null;
+
+function flushMove() {
+  rafId = 0;
+  if (!active || (pendingDx === 0 && pendingDy === 0)) return;
+  const dx = pendingDx;
+  const dy = pendingDy;
+  pendingDx = 0;
+  pendingDy = 0;
+  window.kvm.sendInput({ t: 'mousemove', dx, dy });
+}
+
+function queueMove(dx, dy) {
+  pendingDx += dx;
+  pendingDy += dy;
+  if (!rafId) rafId = requestAnimationFrame(flushMove);
+}
 
 window.kvm.onActiveChange((isActive) => {
   active = isActive;
-  hint.style.display = isActive ? 'block' : 'none';
+  pendingDx = 0;
+  pendingDy = 0;
+  if (rafId) {
+    cancelAnimationFrame(rafId);
+    rafId = 0;
+  }
+  if (hintTimer) {
+    clearTimeout(hintTimer);
+    hintTimer = null;
+  }
+
   if (isActive) {
+    hint.style.display = 'block';
+    hintTimer = setTimeout(() => {
+      hint.style.display = 'none';
+    }, 1800);
     try {
       document.body.requestPointerLock();
     } catch (_) {
       /* ignore */
     }
-  } else if (document.pointerLockElement) {
-    document.exitPointerLock();
+  } else {
+    hint.style.display = 'none';
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
   }
 });
 
@@ -24,7 +61,7 @@ document.body.addEventListener('click', () => {
 document.addEventListener('mousemove', (e) => {
   if (!active) return;
   if (e.movementX === 0 && e.movementY === 0) return;
-  window.kvm.sendInput({ t: 'mousemove', dx: e.movementX, dy: e.movementY });
+  queueMove(e.movementX, e.movementY);
 });
 
 document.addEventListener('mousedown', (e) => {
